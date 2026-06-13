@@ -1,0 +1,36 @@
+services:
+  rv-monitor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: rv-monitor:latest
+    container_name: rv-monitor
+    ports:
+      - "8090:8080"
+    environment:
+      # Scheduling / politeness
+      RV_CHECK_INTERVAL: "${RV_CHECK_INTERVAL:-900000}"
+      RV_POLITE_INTER_DELAY_MS: "${RV_POLITE_INTER_DELAY_MS:-3000}"
+      RV_POLITE_JITTER_MAX_MS: "${RV_POLITE_JITTER_MAX_MS:-30000}"
+      RICHMOND_WATCH_ENABLED: "${RICHMOND_WATCH_ENABLED:-true}"
+      OUTDOORSY_WATCH_ENABLED: "${OUTDOORSY_WATCH_ENABLED:-true}"
+      # Optional RVezy authenticated mode (tokens, never a password)
+      RVEZY_BEARER_TOKEN: "${RVEZY_BEARER_TOKEN:-}"
+      RVEZY_REFRESH_TOKEN: "${RVEZY_REFRESH_TOKEN:-}"
+      # CanaDream (experimental, needs captured auth header)
+      CANADREAM_API_TOKEN: "${CANADREAM_API_TOKEN:-}"
+      CANADREAM_WATCH_ENABLED: "${CANADREAM_WATCH_ENABLED:-false}"
+      # SMTP (leave MAIL_USERNAME blank to log alerts instead of emailing)
+      MAIL_HOST: "${MAIL_HOST:-smtp.gmail.com}"
+      MAIL_PORT: "${MAIL_PORT:-587}"
+      MAIL_USERNAME: "${MAIL_USERNAME:-}"
+      MAIL_PASSWORD: "${MAIL_PASSWORD:-}"
+      MAIL_TO: "${MAIL_TO:-}"
+      MAIL_FROM: "${MAIL_FROM:-rv-monitor@example.com}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3

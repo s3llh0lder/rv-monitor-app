@@ -1,0 +1,50 @@
+rv:
+  rvezy:
+    search-base-url: "https://test.example.com/rv-search"
+  watches:
+    - name: "Test watch (disabled)"
+      provider: "rvezy"
+      address: "Richmond, BC"
+      latitude: 49.1666
+      longitude: -123.1336
+      start-date: "2026-08-26"
+      end-date: "2026-09-04"
+      enabled: false
+  monitor:
+    check-interval: 3600000
+
+notification:
+  email:
+    to: "test@example.com"
+    from: "rv-monitor@test.com"
+
+spring:
+  mail:
+    host: "localhost"
+    port: 2525
+    username: ""
+    password: ""
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+  task:
+    scheduling:
+      enabled: false
+
+management:
+  endpoints:
+    enabled-by-default: false
+  endpoint:
+    health:
+      enabled: false
+  health:
+    mail:
+      enabled: false
+
+logging:
+  level:
+    com.example.rvmonitor: DEBUG
+    root: WARN

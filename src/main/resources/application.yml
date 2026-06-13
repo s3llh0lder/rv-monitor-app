@@ -1,0 +1,115 @@
+server:
+  port: 8080
+  address: 0.0.0.0
+
+rv:
+  # ---------------------------------------------------------------------------
+  # RVezy is reached through its PUBLIC server-side-rendered search page
+  #   https://www.rvezy.com/rv-search?SearchAddress=..&Latitude=..&Longitude=..
+  #                                   &DateStart=YYYY-MM-DD&DateEnd=YYYY-MM-DD
+  # The page embeds date-specific results in a Nuxt __NUXT_DATA__ payload
+  # (the "ListRVs" array). No API key / OAuth token is required — same spirit
+  # as banff-monitor hitting a public availability endpoint.
+  # ---------------------------------------------------------------------------
+  rvezy:
+    search-base-url: "https://www.rvezy.com/rv-search"
+    # Optional authenticated mode. Leave blank to use public SSR scraping (works
+    # out of the box). To enable the full JSON API, capture these from a
+    # logged-in browser (DevTools → Network → an api.rvezy.com request →
+    # Authorization: Bearer <token>). These are TOKENS, never your password.
+    bearer-token: "${RVEZY_BEARER_TOKEN:}"
+    refresh-token: "${RVEZY_REFRESH_TOKEN:}"
+
+  # CanaDream (THL cosmos platform) — EXPERIMENTAL. Needs an auth header captured
+  # from a live booking session; without CANADREAM_API_TOKEN the provider no-ops.
+  canadream:
+    auth-token: "${CANADREAM_API_TOKEN:}"
+
+  # Each watch is a saved search. The scheduled poller checks every enabled
+  # watch each cycle and emails when a NEW matching RV appears for the dates.
+  # Filters: max-price (CAD nightly), radius-km (around lat/lon), pet-friendly.
+  # extra-params lets you pass provider-specific query params (e.g. RVezy's
+  # pet / rv-type filters) without code changes.
+  watches:
+    - name: "Richmond BC — Class C, Aug 26 to Sep 4, pet, <=$250/night"
+      provider: "rvezy"
+      address: "Richmond, BC"
+      latitude: 49.1666
+      longitude: -123.1336
+      start-date: "2026-08-26"
+      end-date: "2026-09-04"
+      # NOTE: RVezy's SSR payload reports Distance as 0, so radius-km can't be
+      # enforced — the search is already centred on lat/lon. Left unset.
+      max-price: 250
+      rv-type: "ClassC"      # enforced client-side; RVezy's own type filter is unreliable
+      pet-friendly: true
+      enabled: "${RICHMOND_WATCH_ENABLED:true}"
+
+    - name: "Outdoorsy — Vancouver area Class C, Aug 26 to Sep 4, <=$250/night"
+      provider: "outdoorsy"
+      address: "Richmond, BC"
+      latitude: 49.1666
+      longitude: -123.1336
+      start-date: "2026-08-26"
+      end-date: "2026-09-04"
+      radius-km: 60
+      max-price: 250
+      rv-type: "Class C"     # Outdoorsy spells it with a space; the filter normalizes
+      enabled: "${OUTDOORSY_WATCH_ENABLED:true}"
+
+    - name: "CanaDream — Class C, Aug 26 to Sep 4 (experimental, needs token)"
+      provider: "canadream"
+      address: "Vancouver, BC"
+      latitude: 49.2827
+      longitude: -123.1207
+      start-date: "2026-08-26"
+      end-date: "2026-09-04"
+      max-price: 250
+      enabled: "${CANADREAM_WATCH_ENABLED:false}"
+
+  # Politeness knobs — stay well below any bot-pattern thresholds.
+  polite:
+    inter-watch-delay-ms: "${RV_POLITE_INTER_DELAY_MS:3000}"
+    jitter-max-ms: "${RV_POLITE_JITTER_MAX_MS:30000}"
+
+  monitor:
+    # ms; default 15 min. P2P listings change far slower than campsites.
+    check-interval: "${RV_CHECK_INTERVAL:900000}"
+
+notification:
+  email:
+    to: "${MAIL_TO:${MAIL_USERNAME:your.email@example.com}}"
+    from: "${MAIL_FROM:rv-monitor@example.com}"
+
+spring:
+  mail:
+    host: "${MAIL_HOST:smtp.gmail.com}"
+    port: "${MAIL_PORT:587}"
+    username: "${MAIL_USERNAME:}"
+    password: "${MAIL_PASSWORD:}"
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 3000
+          writetimeout: 5000
+
+logging:
+  level:
+    com.example.rvmonitor: INFO
+    org.springframework.mail: WARN
+    root: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
