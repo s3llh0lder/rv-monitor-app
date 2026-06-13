@@ -1,3 +1,23 @@
+# Portainer-ready stack. Deploy as a "Repository" stack in Portainer pointing
+# at this repo with Compose path = `docker/docker-compose.yml`.
+#
+# Set values in Portainer's "Environment variables" UI (defaults below apply
+# when unset):
+#   MAIL_USERNAME, MAIL_PASSWORD   — Gmail SMTP (App Password) for alerts.
+#                                    Leave blank to LOG alerts instead of email.
+#   MAIL_TO                        — where alerts are sent.
+#   RV_MONITOR_HOST_PORT           — host port (default 8092; 8090 is often taken).
+#   RV_CHECK_INTERVAL              — poll period in ms (default 900000 = 15 min).
+#   RICHMOND_WATCH_ENABLED / OUTDOORSY_WATCH_ENABLED  — default true.
+#   CANADREAM_WATCH_ENABLED        — default false (experimental provider).
+#   RVEZY_BEARER_TOKEN / RVEZY_REFRESH_TOKEN  — optional; enable authenticated
+#                                    enrichment (Length/Make/Model). TOKENS, not
+#                                    a password.
+#   CANADREAM_API_TOKEN            — optional; only if enabling CanaDream.
+#
+# Portainer's env UI populates a stack.env used for ${VAR} substitution here;
+# the environment: block injects the values into the container.
+
 services:
   rv-monitor:
     build:
@@ -5,32 +25,57 @@ services:
       dockerfile: docker/Dockerfile
     image: rv-monitor:latest
     container_name: rv-monitor
-    ports:
-      - "8090:8080"
+    restart: unless-stopped
+
     environment:
-      # Scheduling / politeness
+      # --- Spring profile ---
+      SPRING_PROFILES_ACTIVE: "${SPRING_PROFILES_ACTIVE:-prod}"
+
+      # --- Scheduling / politeness (defaults match application.yml) ---
       RV_CHECK_INTERVAL: "${RV_CHECK_INTERVAL:-900000}"
       RV_POLITE_INTER_DELAY_MS: "${RV_POLITE_INTER_DELAY_MS:-3000}"
       RV_POLITE_JITTER_MAX_MS: "${RV_POLITE_JITTER_MAX_MS:-30000}"
+
+      # --- Watch toggles ---
       RICHMOND_WATCH_ENABLED: "${RICHMOND_WATCH_ENABLED:-true}"
       OUTDOORSY_WATCH_ENABLED: "${OUTDOORSY_WATCH_ENABLED:-true}"
-      # Optional RVezy authenticated mode (tokens, never a password)
+      CANADREAM_WATCH_ENABLED: "${CANADREAM_WATCH_ENABLED:-false}"
+
+      # --- Optional RVezy authenticated enrichment (TOKENS, never a password) ---
       RVEZY_BEARER_TOKEN: "${RVEZY_BEARER_TOKEN:-}"
       RVEZY_REFRESH_TOKEN: "${RVEZY_REFRESH_TOKEN:-}"
-      # CanaDream (experimental, needs captured auth header)
+
+      # --- Optional CanaDream (experimental, needs captured auth header) ---
       CANADREAM_API_TOKEN: "${CANADREAM_API_TOKEN:-}"
-      CANADREAM_WATCH_ENABLED: "${CANADREAM_WATCH_ENABLED:-false}"
-      # SMTP (leave MAIL_USERNAME blank to log alerts instead of emailing)
+
+      # --- SMTP (blank MAIL_USERNAME → alerts are logged, not emailed) ---
       MAIL_HOST: "${MAIL_HOST:-smtp.gmail.com}"
       MAIL_PORT: "${MAIL_PORT:-587}"
       MAIL_USERNAME: "${MAIL_USERNAME:-}"
       MAIL_PASSWORD: "${MAIL_PASSWORD:-}"
       MAIL_TO: "${MAIL_TO:-}"
       MAIL_FROM: "${MAIL_FROM:-rv-monitor@example.com}"
-    restart: unless-stopped
+      # Don't let an absent/misconfigured SMTP probe spam /actuator/health.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "${MANAGEMENT_HEALTH_MAIL_ENABLED:-false}"
+
+    ports:
+      - "${RV_MONITOR_HOST_PORT:-8092}:8080"
+
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 5s
       start_period: 60s
       retries: 3
+
+    # Keep container logs bounded so Portainer's log view stays responsive.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      - "io.portainer.accesscontrol.teams=admins"
+      - "com.example.app=rv-monitor"
+      - "com.example.role=availability-poller"
