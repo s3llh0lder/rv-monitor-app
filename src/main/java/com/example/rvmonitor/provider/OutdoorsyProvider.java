@@ -11,8 +11,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
@@ -57,9 +59,75 @@ public class OutdoorsyProvider implements RvProvider {
 
     void setMaxPages(int maxPages) { this.maxPages = maxPages; }
 
+    /** Cap on per-listing quote/availability checks per search (politeness). */
+    private int maxVerify = 20;
+
+    void setMaxVerify(int maxVerify) { this.maxVerify = maxVerify; }
+
     @Override
     public String key() {
         return "outdoorsy";
+    }
+
+    /**
+     * Verify availability for the final matches. Outdoorsy's search returns
+     * relevance/location matches, NOT an availability filter — booked listings
+     * (e.g. Yatra 1) still appear. The quote endpoint is the authoritative,
+     * no-auth check: a quote is created (2xx) only when the rental is bookable
+     * for the dates; otherwise it 400s. We drop the 400s. On other errors we keep
+     * the listing (can't disprove) rather than risk a miss.
+     */
+    @Override
+    public List<RvListing> refine(Watch watch, List<RvListing> matches) {
+        if (matches.isEmpty()) {
+            return matches;
+        }
+        List<RvListing> kept = new ArrayList<>();
+        int checked = 0, dropped = 0;
+        for (RvListing rv : matches) {
+            if (checked >= maxVerify) {
+                kept.add(rv);
+                continue;
+            }
+            checked++;
+            Boolean bookable = isBookable(rv.getId(), watch.getStartDate(), watch.getEndDate());
+            if (bookable == null || bookable) {
+                kept.add(rv);
+            } else {
+                dropped++;
+                logger.info("Outdoorsy dropped '{}' — not bookable for {}→{}",
+                        rv.getName(), watch.getStartDate(), watch.getEndDate());
+            }
+        }
+        logger.info("Outdoorsy verified {} match(es): {} available, {} dropped",
+                checked, kept.size() - Math.max(0, matches.size() - checked), dropped);
+        return kept;
+    }
+
+    /** null = couldn't determine; true = quote created (available); false = 400 (unavailable). */
+    private Boolean isBookable(String rentalId, String from, String to) {
+        if (rentalId == null) {
+            return null;
+        }
+        try {
+            HttpHeaders h = new HttpHeaders();
+            h.setContentType(MediaType.APPLICATION_JSON);
+            h.set("Accept", "application/json");
+            h.set("User-Agent", USER_AGENT);
+            String body = String.format("{\"rental_id\":%s,\"from\":\"%s\",\"to\":\"%s\"}", rentalId, from, to);
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    URI.create(config.getOutdoorsy().getQuoteUrl()),
+                    HttpMethod.POST, new HttpEntity<>(body, h), String.class);
+            return resp.getStatusCode().is2xxSuccessful();
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 400) {
+                return false; // "not available to be booked for the selected dates"
+            }
+            return null; // auth/other → can't determine
+        } catch (Exception e) {
+            logger.warn("Outdoorsy quote check failed for {}: {}", rentalId, e.toString());
+            return null;
+        }
     }
 
     @Override

@@ -77,10 +77,16 @@ public class MonitorConfig {
 
     public static class Outdoorsy {
         private String apiUrl = "https://api.outdoorsy.com/v0/rentals";
+        // Quote endpoint doubles as the authoritative availability check: 201 =
+        // bookable for the dates, 400 = not available. The search API does NOT
+        // filter by availability, so each match is verified here.
+        private String quoteUrl = "https://api.outdoorsy.com/v0/quotes";
         private String currency = "CAD";
         private int defaultRadiusMiles = 40;
         public String getApiUrl() { return apiUrl; }
         public void setApiUrl(String apiUrl) { this.apiUrl = apiUrl; }
+        public String getQuoteUrl() { return quoteUrl; }
+        public void setQuoteUrl(String quoteUrl) { this.quoteUrl = quoteUrl; }
         public String getCurrency() { return currency; }
         public void setCurrency(String currency) { this.currency = currency; }
         public int getDefaultRadiusMiles() { return defaultRadiusMiles; }
