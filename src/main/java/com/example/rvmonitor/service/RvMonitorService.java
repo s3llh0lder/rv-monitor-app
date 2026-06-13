@@ -109,9 +109,9 @@ public class RvMonitorService {
         }
         List<RvListing> all = provider.search(w);
         List<RvListing> matches = all.stream().filter(rv -> passesFilters(w, rv)).toList();
-        // Enrich only the final matches (e.g. RVezy authenticated length/make/model).
-        provider.enrich(matches);
-        return matches;
+        // Verify + enrich the final matches: e.g. RVezy drops listings booked for
+        // the dates (the search doesn't guarantee availability) and adds length/make/model.
+        return provider.refine(w, matches);
     }
 
     boolean passesFilters(Watch w, RvListing rv) {

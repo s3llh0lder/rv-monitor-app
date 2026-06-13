@@ -4,6 +4,7 @@ import com.example.rvmonitor.config.MonitorConfig;
 import com.example.rvmonitor.model.RvListing;
 import com.example.rvmonitor.model.Watch;
 import com.example.rvmonitor.provider.RvProvider;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,7 @@ import org.springframework.web.client.RestTemplate;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,8 +53,8 @@ public class RvezyProvider implements RvProvider {
 
     /** How many result pages to pull per search. The first page holds ~30 units. */
     private int maxPages = 2;
-    /** Cap on authenticated per-listing enrichment calls per search (politeness). */
-    private int maxEnrich = 12;
+    /** Cap on per-listing calendar/enrichment fetches per search (politeness). */
+    private int maxRefine = 20;
 
     @Autowired
     public RvezyProvider(MonitorConfig config, RestTemplate restTemplate, RvezyAuthClient authClient) {
@@ -81,21 +83,85 @@ public class RvezyProvider implements RvProvider {
     }
 
     /**
-     * Authenticated enrichment of the final matches: folds in Length / Make /
-     * Model from the get-by-id API. Bounded by {@link #maxEnrich} for politeness.
+     * Verify + enrich the final matches. RVezy's SSR search does NOT guarantee a
+     * listing is free for the whole date range, so we check each listing's real
+     * {@code Calendars} and drop any booked for the watch dates. Detail comes from
+     * the authenticated get-by-id (also enriches with Length/Make/Model) when a
+     * token is set, otherwise from the public listing page. On a fetch error we
+     * keep the listing (can't prove it unavailable) rather than risk a miss.
      */
     @Override
-    public void enrich(List<RvListing> matches) {
-        if (authClient == null || !authClient.isEnabled() || matches.isEmpty()) {
-            return;
+    public List<RvListing> refine(Watch watch, List<RvListing> matches) {
+        if (matches.isEmpty()) {
+            return matches;
         }
-        int n = 0;
+        LocalDate start = parseDate(watch.getStartDate());
+        LocalDate end = parseDate(watch.getEndDate());
+        if (start == null || end == null) {
+            logger.warn("RVezy refine skipped — bad watch dates {} / {}",
+                    watch.getStartDate(), watch.getEndDate());
+            return matches;
+        }
+
+        List<RvListing> kept = new ArrayList<>();
+        int verified = 0, dropped = 0;
         for (RvListing rv : matches) {
-            if (n >= maxEnrich) break;
-            authClient.enrich(rv);
-            n++;
+            if (verified >= maxRefine) {  // safety cap; keep the rest unverified
+                kept.add(rv);
+                continue;
+            }
+            verified++;
+            List<String[]> blocked = blockedRangesFor(rv);
+            if (blocked == null) {           // fetch failed → can't disprove; keep
+                kept.add(rv);
+                continue;
+            }
+            if (RvezyAvailability.isAvailable(blocked, start, end)) {
+                kept.add(rv);
+            } else {
+                dropped++;
+                logger.info("RVezy dropped '{}' — booked for {}→{}", rv.getName(),
+                        watch.getStartDate(), watch.getEndDate());
+            }
         }
-        logger.info("RVezy enriched {} of {} match(es) via authenticated API", n, matches.size());
+        logger.info("RVezy verified {} match(es): {} available, {} dropped (booked)",
+                verified, kept.size() - Math.max(0, matches.size() - verified), dropped);
+        return kept;
+    }
+
+    /**
+     * Blocked date ranges for a listing, plus enrichment as a side effect when
+     * authenticated. Returns null if the calendar couldn't be fetched.
+     */
+    private List<String[]> blockedRangesFor(RvListing rv) {
+        if (authClient != null && authClient.isEnabled() && rv.getId() != null) {
+            JsonNode detail = authClient.fetchDetail(rv.getId());
+            if (detail != null) {
+                RvezyAuthClient.applyEnrichment(rv, detail);
+                return RvezyAuthClient.calendarsFromDetail(detail);
+            }
+            // fall through to public page if the authed call failed
+        }
+        if (rv.getUrl() == null) {
+            return null;
+        }
+        try {
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    URI.create(rv.getUrl()), HttpMethod.GET, new HttpEntity<>(buildHeaders()), String.class);
+            String html = resp.getBody();
+            return html == null ? null : NuxtDataParser.extractCalendarRanges(html);
+        } catch (Exception e) {
+            logger.warn("RVezy calendar fetch failed for '{}': {}", rv.getName(), e.toString());
+            return null;
+        }
+    }
+
+    private static LocalDate parseDate(String s) {
+        try {
+            return s == null ? null : LocalDate.parse(s.substring(0, 10));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private List<RvListing> scrapeSsr(Watch watch) {

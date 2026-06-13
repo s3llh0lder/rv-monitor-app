@@ -21,12 +21,14 @@ public interface RvProvider {
     List<RvListing> search(Watch watch) throws Exception;
 
     /**
-     * Optionally add expensive per-listing detail to the FINAL matches (after the
-     * monitor has filtered them), mutating each in place. Default is a no-op;
-     * RVezy uses it for authenticated enrichment (length, make/model). Called only
-     * on the filtered set so we never spend calls on listings we'd discard.
+     * Optionally verify and enrich the FINAL matches (after the monitor has
+     * filtered them), returning the listings to actually report. This is where a
+     * provider does expensive per-listing work it shouldn't spend on discarded
+     * candidates: RVezy verifies each listing's real calendar (dropping ones
+     * booked for the watch dates — the SSR search doesn't guarantee availability)
+     * and folds in length/make/model. Default returns the matches unchanged.
      */
-    default void enrich(List<RvListing> matches) {
-        // no-op by default
+    default List<RvListing> refine(Watch watch, List<RvListing> matches) {
+        return matches;
     }
 }

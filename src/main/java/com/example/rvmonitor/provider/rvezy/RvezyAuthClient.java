@@ -14,6 +14,8 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Optional authenticated enrichment against RVezy's JSON API
@@ -57,15 +59,19 @@ public class RvezyAuthClient {
     }
 
     /**
-     * Folds authenticated detail (length, make, model, and any missing
-     * price/rating) into the given listing. Best-effort: logs and leaves the
-     * listing unchanged on failure so discovery still succeeds.
+     * Authenticated get-by-id detail JSON (includes Calendars + Length/Make/Model),
+     * or null on failure. Public so the provider can use it for both availability
+     * verification and enrichment in a single call.
      */
-    public void enrich(RvListing rv) {
-        if (rv.getId() == null) {
-            return;
+    public JsonNode fetchDetail(String id) {
+        if (id == null) {
+            return null;
         }
-        JsonNode detail = fetchListing(rv.getId(), true);
+        return fetchListing(id, true);
+    }
+
+    /** Folds detail fields (length, make, model, missing price/rating) into a listing. */
+    public static void applyEnrichment(RvListing rv, JsonNode detail) {
         if (detail == null) {
             return;
         }
@@ -81,6 +87,25 @@ public class RvezyAuthClient {
         if (rv.getNightlyPrice() == null && detail.hasNonNull("DefaultPrice")) {
             rv.setNightlyPrice(detail.get("DefaultPrice").asDouble());
         }
+    }
+
+    /** Blocked [startDate, endDate] ranges from a detail JSON's {@code Calendars} array. */
+    public static List<String[]> calendarsFromDetail(JsonNode detail) {
+        List<String[]> ranges = new ArrayList<>();
+        if (detail == null) {
+            return ranges;
+        }
+        JsonNode cals = detail.get("Calendars");
+        if (cals != null && cals.isArray()) {
+            for (JsonNode c : cals) {
+                JsonNode s = c.get("StartDate");
+                JsonNode e = c.get("EndDate");
+                if (s != null && e != null) {
+                    ranges.add(new String[]{s.asText(), e.asText()});
+                }
+            }
+        }
+        return ranges;
     }
 
     private JsonNode fetchListing(String id, boolean allowRefresh) {

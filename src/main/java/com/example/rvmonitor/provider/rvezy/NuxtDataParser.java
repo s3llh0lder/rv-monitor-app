@@ -62,6 +62,54 @@ public final class NuxtDataParser {
         return new NuxtDataParser(array).collectListings();
     }
 
+    /**
+     * Returns the blocked/unavailable date ranges from a listing page's
+     * {@code Calendars} array, as {@code [startDate, endDate]} ISO-date string
+     * pairs. Empty if the page has no calendar (e.g. a search page).
+     */
+    public static List<String[]> extractCalendarRanges(String html) {
+        Matcher m = NUXT_DATA.matcher(html);
+        if (!m.find()) {
+            return List.of();
+        }
+        JsonNode array;
+        try {
+            array = MAPPER.readTree(m.group(1));
+        } catch (Exception e) {
+            return List.of();
+        }
+        if (array == null || !array.isArray()) {
+            return List.of();
+        }
+        return new NuxtDataParser(array).collectCalendarRanges();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String[]> collectCalendarRanges() {
+        for (int i = 0; i < entries.size(); i++) {
+            JsonNode entry = entries.get(i);
+            if (!entry.isObject() || !entry.has("Calendars") || !entry.get("Calendars").isInt()) {
+                continue;
+            }
+            Object resolved = resolve(entry.get("Calendars").intValue(), 0, new HashSet<>());
+            if (!(resolved instanceof List<?> list)) {
+                continue;
+            }
+            List<String[]> ranges = new ArrayList<>();
+            for (Object o : list) {
+                if (o instanceof Map<?, ?> map) {
+                    Object s = ((Map<String, Object>) map).get("StartDate");
+                    Object e = ((Map<String, Object>) map).get("EndDate");
+                    if (s != null && e != null) {
+                        ranges.add(new String[]{String.valueOf(s), String.valueOf(e)});
+                    }
+                }
+            }
+            return ranges;
+        }
+        return List.of();
+    }
+
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> collectListings() {
         List<Map<String, Object>> out = new ArrayList<>();

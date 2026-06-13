@@ -53,4 +53,35 @@ class NuxtDataParserTest {
         assertTrue(NuxtDataParser.extractListings("<html>no nuxt here</html>").isEmpty());
         assertTrue(NuxtDataParser.extractListings("").isEmpty());
     }
+
+    private String listingFixture() throws Exception {
+        try (var in = getClass().getResourceAsStream("/rvezy-listing-fixture.html")) {
+            assertNotNull(in, "listing fixture missing");
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    void extractsCalendarBlockedRangesFromListingPage() throws Exception {
+        // Real Cultus listing — booked across the trip window (Aug 29–Sep 4 2026).
+        List<String[]> ranges = NuxtDataParser.extractCalendarRanges(listingFixture());
+        assertFalse(ranges.isEmpty(), "no calendar ranges parsed");
+        boolean blocksTripWindow = ranges.stream().anyMatch(r ->
+                r[0].startsWith("2026-08-29") || r[0].startsWith("2026-09-0"));
+        assertTrue(blocksTripWindow, "expected blocked dates in the Aug29–Sep trip window");
+    }
+
+    @Test
+    void cultusIsCorrectlyUnavailableForTheTrip() throws Exception {
+        // End-to-end: the listing the monitor false-positived on must be rejected.
+        List<String[]> ranges = NuxtDataParser.extractCalendarRanges(listingFixture());
+        assertFalse(RvezyAvailability.isAvailable(ranges,
+                java.time.LocalDate.parse("2026-08-26"), java.time.LocalDate.parse("2026-09-04")));
+    }
+
+    @Test
+    void searchPageHasNoCalendar() throws Exception {
+        // The search fixture isn't a listing page → no Calendars, returns empty (not error).
+        assertTrue(NuxtDataParser.extractCalendarRanges(fixture()).isEmpty());
+    }
 }
