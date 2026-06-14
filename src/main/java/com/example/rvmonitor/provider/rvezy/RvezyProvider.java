@@ -84,11 +84,12 @@ public class RvezyProvider implements RvProvider {
 
     /**
      * Verify + enrich the final matches. RVezy's SSR search does NOT guarantee a
-     * listing is free for the whole date range, so we check each listing's real
-     * {@code Calendars} and drop any booked for the watch dates. Detail comes from
-     * the authenticated get-by-id (also enriches with Length/Make/Model) when a
-     * token is set, otherwise from the public listing page. On a fetch error we
-     * keep the listing (can't prove it unavailable) rather than risk a miss.
+     * listing is free for the whole date range, so we fetch each listing's PUBLIC
+     * page — the reliable source for both the real {@code Calendars} (drop any
+     * booked for the watch dates) and detail (Length/Make/Model). The
+     * authenticated get-by-id is NOT used here: its {@code Calendars} comes back
+     * null, which would let booked listings through. On a fetch error we keep the
+     * listing (can't prove it unavailable) rather than risk a miss.
      */
     @Override
     public List<RvListing> refine(Watch watch, List<RvListing> matches) {
@@ -111,12 +112,13 @@ public class RvezyProvider implements RvProvider {
                 continue;
             }
             verified++;
-            List<String[]> blocked = blockedRangesFor(rv);
-            if (blocked == null) {           // fetch failed → can't disprove; keep
+            NuxtDataParser.ListingPage page = fetchListingPage(rv);
+            if (page == null) {              // fetch failed → can't disprove; keep
                 kept.add(rv);
                 continue;
             }
-            if (RvezyAvailability.isAvailable(blocked, start, end)) {
+            if (RvezyAvailability.isAvailable(page.blocked(), start, end)) {
+                applyDetail(rv, page.detail());
                 kept.add(rv);
             } else {
                 dropped++;
@@ -129,19 +131,8 @@ public class RvezyProvider implements RvProvider {
         return kept;
     }
 
-    /**
-     * Blocked date ranges for a listing, plus enrichment as a side effect when
-     * authenticated. Returns null if the calendar couldn't be fetched.
-     */
-    private List<String[]> blockedRangesFor(RvListing rv) {
-        if (authClient != null && authClient.isEnabled() && rv.getId() != null) {
-            JsonNode detail = authClient.fetchDetail(rv.getId());
-            if (detail != null) {
-                RvezyAuthClient.applyEnrichment(rv, detail);
-                return RvezyAuthClient.calendarsFromDetail(detail);
-            }
-            // fall through to public page if the authed call failed
-        }
+    /** Fetch + parse a listing's public page (calendar + detail). Null on failure. */
+    private NuxtDataParser.ListingPage fetchListingPage(RvListing rv) {
         if (rv.getUrl() == null) {
             return null;
         }
@@ -149,11 +140,27 @@ public class RvezyProvider implements RvProvider {
             ResponseEntity<String> resp = restTemplate.exchange(
                     URI.create(rv.getUrl()), HttpMethod.GET, new HttpEntity<>(buildHeaders()), String.class);
             String html = resp.getBody();
-            return html == null ? null : NuxtDataParser.extractCalendarRanges(html);
+            return html == null ? null : NuxtDataParser.extractListingPage(html);
         } catch (Exception e) {
-            logger.warn("RVezy calendar fetch failed for '{}': {}", rv.getName(), e.toString());
+            logger.warn("RVezy listing-page fetch failed for '{}': {}", rv.getName(), e.toString());
             return null;
         }
+    }
+
+    /** Fold public-page detail (Length/Make/Model, and any missing fields) into a listing. */
+    void applyDetail(RvListing rv, Map<String, Object> d) {
+        if (d == null || d.isEmpty()) {
+            return;
+        }
+        Double len = toDouble(d.get("Length"));
+        if (len != null) rv.setLengthFt(len);
+        if (d.get("Make") != null) rv.setMake(String.valueOf(d.get("Make")));
+        if (d.get("Model") != null) rv.setModel(String.valueOf(d.get("Model")));
+        if (rv.getYear() == null) rv.setYear(toInt(d.get("Year")));
+        if (rv.getGuests() == null) rv.setGuests(toInt(d.get("Guests")));
+        if (rv.getRating() == null) rv.setRating(toDouble(d.get("AverageRating")));
+        if (rv.getNumReviews() == null) rv.setNumReviews(toInt(d.get("NumberOfReviews")));
+        if (rv.getNightlyPrice() == null) rv.setNightlyPrice(toDouble(d.get("DefaultPrice")));
     }
 
     private static LocalDate parseDate(String s) {

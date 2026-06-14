@@ -84,4 +84,17 @@ class NuxtDataParserTest {
         // The search fixture isn't a listing page → no Calendars, returns empty (not error).
         assertTrue(NuxtDataParser.extractCalendarRanges(fixture()).isEmpty());
     }
+
+    @Test
+    void extractListingPageReturnsCalendarAndDetailTogether() throws Exception {
+        // One parse of the real Cultus page yields both the blocked calendar and detail.
+        NuxtDataParser.ListingPage page = NuxtDataParser.extractListingPage(listingFixture());
+        assertFalse(page.blocked().isEmpty(), "expected blocked ranges");
+        assertEquals("Cultus", page.detail().get("RVName"));
+        assertEquals(19L, ((Number) page.detail().get("Length")).longValue());
+        assertNotNull(page.detail().get("Make"));
+        // And it's correctly unavailable for the trip.
+        assertFalse(RvezyAvailability.isAvailable(page.blocked(),
+                java.time.LocalDate.parse("2026-08-26"), java.time.LocalDate.parse("2026-09-04")));
+    }
 }

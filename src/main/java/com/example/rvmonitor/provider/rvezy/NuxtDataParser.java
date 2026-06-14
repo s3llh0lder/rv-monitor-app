@@ -62,6 +62,65 @@ public final class NuxtDataParser {
         return new NuxtDataParser(array).collectListings();
     }
 
+    /** A listing page's blocked date ranges plus its scalar detail fields. */
+    public record ListingPage(List<String[]> blocked, Map<String, Object> detail) {}
+
+    /**
+     * Parses a listing page once and returns BOTH its blocked {@code Calendars}
+     * ranges (authoritative availability) and its detail scalars (Length, Make,
+     * Model, …). The public listing page is the reliable source for both — the
+     * authenticated get-by-id returns {@code Calendars: null}.
+     */
+    public static ListingPage extractListingPage(String html) {
+        JsonNode array = parseNuxtData(html);
+        if (array == null) {
+            return new ListingPage(List.of(), Map.of());
+        }
+        NuxtDataParser p = new NuxtDataParser(array);
+        return new ListingPage(p.collectCalendarRanges(), p.collectListingDetail());
+    }
+
+    /** The listing's scalar detail fields (RVName, Length, Make, Model, …). */
+    private Map<String, Object> collectListingDetail() {
+        String[] want = {"RVName", "Length", "Make", "Model", "Year", "Guests",
+                "RVType", "AverageRating", "NumberOfReviews", "DefaultPrice"};
+        for (JsonNode e : entries) {
+            if (e.isObject() && e.has("RVName") && e.has("Length")) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                for (String k : want) {
+                    if (e.has(k)) {
+                        Object v = scalarRef(e.get(k));
+                        if (v != null) m.put(k, v);
+                    }
+                }
+                return m;
+            }
+        }
+        return Map.of();
+    }
+
+    /** Resolve a member that is either a literal scalar or an index to a scalar. */
+    private Object scalarRef(JsonNode member) {
+        if (member.isInt()) {
+            int idx = member.intValue();
+            return (idx >= 0 && idx < entries.size()) ? scalar(entries.get(idx)) : null;
+        }
+        return scalar(member);
+    }
+
+    private static JsonNode parseNuxtData(String html) {
+        Matcher m = NUXT_DATA.matcher(html);
+        if (!m.find()) {
+            return null;
+        }
+        try {
+            JsonNode array = MAPPER.readTree(m.group(1));
+            return array != null && array.isArray() ? array : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /**
      * Returns the blocked/unavailable date ranges from a listing page's
      * {@code Calendars} array, as {@code [startDate, endDate]} ISO-date string
